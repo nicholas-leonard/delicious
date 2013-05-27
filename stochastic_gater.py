@@ -33,9 +33,7 @@ from pylearn2.utils import sharedX
 from pylearn2.costs.cost import Cost
 from pylearn2.models.mlp import MLP, Softmax, Layer, Linear
 from pylearn2.space import VectorSpace, Conv2DSpace, CompositeSpace, Space
-
-#weight_decay_array
-    
+ 
 class Stochastic1Cost(Cost):
     supervised = True
     def __init__(self, cost_type='default'):
@@ -120,7 +118,7 @@ class Stochastic1Cost(Cost):
             cost += layer.get_cost()'''
             
         
-        params = [self.Y_hat]
+        params = [self.z]
         grads = T.grad(cost, params, disconnected_inputs = 'raise', 
                         consider_constant=model.get_params())
 
@@ -149,17 +147,34 @@ class Stochastic1Cost(Cost):
         
     def __call__(self, model, X, Y, ** kwargs):
         if self.use_dropout:
-            self.Y_hat = model.dropout_fprop(X, default_input_include_prob=self.default_input_include_prob,
+            Y_hat = model.dropout_fprop(X, default_input_include_prob=self.default_input_include_prob,
                     input_include_probs=self.input_include_probs, default_input_scale=self.default_input_scale,
                     input_scales=self.input_scales
                     )
         else:
-            self.Y_hat = model.fprop(X)
+            Y_hat = model.fprop(X)
         
         if self.cost_type == 'default':
             # nll
-            cost = model.cost(Y, Y_hat)
-            self.loss = (-Y * T.log(self.Y_hat)).sum(axis=1)
+            assert hasattr(Y_hat, 'owner')
+            owner = Y_hat.owner
+            assert owner is not None
+            op = owner.op
+            assert isinstance(op, T.nnet.Softmax)
+            z ,= owner.inputs
+            self.z = z
+            assert z.ndim == 2
+
+            z = z - z.max(axis=1).dimshuffle(0, 'x')
+            log_prob = z - T.log(T.exp(z).sum(axis=1).dimshuffle(0, 'x'))
+            # we use sum and not mean because this is really one variable per row
+            log_prob_of = (Y * log_prob).sum(axis=1)
+            assert log_prob_of.ndim == 1
+
+            rval = log_prob_of.mean()
+
+            cost = - rval
+            self.loss = (-Y * T.log(Y_hat)).sum(axis=1)
         else:
             raise NotImplementedError()
         return cost
@@ -536,7 +551,7 @@ class Stochastic1(Layer):
             if self.weight_decay_coeff[i] is not None:
                 rval += self.weight_decay_coeff[i]*T.sqr(self.W[i]).sum()
         return rval
-        
+
 class Stochastic2(Layer):
     """
     A linear layer for the continus part, 
@@ -725,24 +740,25 @@ class Stochastic2(Layer):
         
     def get_monitoring_channels_from_state(self, state, target=None):
         rval =  OrderedDict()
-
-        mx = state.max(axis=0)
-        mean = state.mean(axis=0)
-        mn = state.min(axis=0)
-
-        rval['max_x_max_u'] = mx.max()
-        rval['max_x_mean_u'] = mx.mean()
-        rval['max_x_min_u'] = mx.min()
-
-        rval['mean_x_max_u'] = mean.max()
-        rval['mean_x_mean_u'] = mean.mean()
-        rval['mean_x_min_u'] = mean.min()
-
-        rval['min_x_max_u'] = mn.max()
-        rval['min_x_mean_u'] = mn.mean()
-        rval['min_x_min_u'] = mn.min()
+        # sparisty of outputs:
         rval['mean_output_sparsity'] = self.m_mean.mean()
-
+        # proportion of sigmoids that have prob > 0.5
+        # good when equal to sparsity
+        floatX = theano.config.floatX
+        rval['mean_sparsity_prop'] \
+            = T.cast(T.gt(self.m_mean, 0.5),floatX).mean()
+        # max and min proportion of these probs per unit
+        prop_per_unit = T.cast(T.gt(self.m_mean, 0.5),floatX).mean(0)
+        # if this is high, it means a unit is likely always active (bad)
+        rval['max_unit_sparsity_prop'] = prop_per_unit.max()
+        rval['min_unit_sparsity_prop'] = prop_per_unit.min()
+        # in both cases, high means units are popular (bad)
+        # proportion of units with p>0.5 more than 50% of time:
+        rval['mean_unit_sparsity_meta_prop'] \
+            = T.cast(T.gt(prop_per_unit,0.5),floatX).mean()
+        # proportion of units with p>0.5 more than 75% of time:
+        rval['mean_unit_sparsity_meta_prop2'] \
+            = T.cast(T.gt(prop_per_unit,0.75),floatX).mean()
         return rval
 
     def fprop(self, state_below):
@@ -795,6 +811,68 @@ class Stochastic2(Layer):
         rng = MRG_RandomStreams(self.mlp.rng.randint(2**15))
         self.m = rng.binomial(size = self.m_mean.shape, n = 1 , \
                         p = self.m_mean, dtype=self.m_mean.type.dtype)
+           
+        # mask output of linear part with samples from linear part
+        self.p = self.m * self.z
+        
+        if self.layer_name is not None:
+            self.z.name = self.layer_name + '_z'
+            self.h.name = self.layer_name + '_h'
+            self.a.name = self.layer_name + '_a'
+            self.m_mean.name = self.layer_name + '_m_mean'
+            self.m.name = self.layer_name + '_m'
+            self.p.name = self.layer_name + '_p'
+        
+        return self.p
+        
+    def test_fprop(self, state_below, threshold=0.14):
+        self.input_space.validate(state_below)
+
+        if self.requires_reformat:
+            if not isinstance(state_below, tuple):
+                for sb in get_debug_values(state_below):
+                    if sb.shape[0] != self.dbm.batch_size:
+                        raise ValueError("self.dbm.batch_size is %d but got shape of %d" % (self.dbm.batch_size, sb.shape[0]))
+                    assert reduce(lambda x,y: x * y, sb.shape[1:]) == self.input_dim
+
+            state_below = self.input_space.format_as(state_below, self.desired_space)
+        
+        self.x = state_below
+        
+        # linear part
+        if isinstance(self.x, S.SparseVariable):
+            self.z = S.dot(self.x,self.W[0]) + self.b[0]
+        else:
+            self.z = T.dot(self.x,self.W[0]) + self.b[0]
+        
+        # first layer non-linear part
+        if isinstance(self.x, S.SparseVariable):
+            h = S.dot(self.x,self.W[1]) + self.b[1]
+        else:
+            h = T.dot(self.x,self.W[1]) + self.b[1]
+        
+        # activate hidden units of non-linear part
+        if self.hidden_activation is None:
+            pass
+        elif self.hidden_activation == 'tanh':
+            self.h = T.tanh(h)
+        elif self.hidden_activation == 'sigmoid':
+            self.h = T.nnet.sigmoid(h)
+        elif self.hidden_activation == 'softmax':
+            self.h = T.nnet.softmax(h)
+        elif self.hidden_activation == 'rectifiedlinear':
+            self.h = T.maximum(0, h)
+        else:
+            raise NotImplementedError()
+        
+        # second layer non-linear part
+        self.a = T.dot(self.h,self.W[2]) + self.b[2]
+        
+        # activate non-linear part to get bernouilli probabilities
+        self.m_mean = T.nnet.sigmoid(self.a)
+        
+        # deterministic mask:
+        self.m = T.cast(T.gt(self.m_mean, threshold),theano.config.floatX)
            
         # mask output of linear part with samples from linear part
         self.p = self.m * self.z
@@ -900,6 +978,7 @@ class Stochastic2(Layer):
             if self.weight_decay_coeff[i] is not None:
                 rval += self.weight_decay_coeff[i]*T.sqr(self.W[i]).sum()
         return rval
+        
                        
 class StochasticSoftmax(Softmax):
     def __init__(self, n_classes, layer_name, irange = None,

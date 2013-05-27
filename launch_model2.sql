@@ -545,3 +545,56 @@ INSERT INTO hps3.config_mlp_sgd (
 	     (SELECT generate_series(3043,3047,1) AS layer2) AS b
 	ORDER BY random_seed LIMIT 100
 ) RETURNING config_id;--7509-7608
+
+UPDATE hps3.config_mlp_sgd SET description = 'stoch2b no NaNs? new channels' WHERE task_id = 23 AND start_time IS NULL
+
+
+
+/* Stochastic2 More hiddens */
+
+
+INSERT INTO stochastic.layer_stochastic2 (layer_class,dim,hidden_dim,mean_loss_coeff,
+					 sparsity_target,sparsity_cost_coeff,irange,W_lr_scale,b_lr_scale) (
+SELECT a, dim, b, mean_loss_coeff,0.1,sparsity_cost_coeff, ARRAY[0.05,0.05,0.05]::FLOAT4[], d, d
+FROM	(
+	SELECT 'stochastic2' AS a,dim,(dim*hidden_proportion)::INT4 AS b,mean_loss_coeff,random(),
+		sparsity_cost_coeff,ARRAY[lr_scale0,lr_scale1,lr_scale2]::FLOAT[] as d
+	FROM (SELECT unnest('{320,640,1280}'::INT4[]) AS dim) AS a,
+		(SELECT unnest('{0.1,0.2}'::FLOAT4[]) AS hidden_proportion) AS b,
+		(SELECT unnest('{0.7,0.8,0.9}'::FLOAT4[]) AS mean_loss_coeff) AS c,
+		(SELECT unnest('{5,10,20}'::FLOAT4[]) AS sparsity_cost_coeff) AS e,
+		(SELECT unnest('{1.0,0.1}'::FLOAT4[]) AS lr_scale0) AS g,
+		(SELECT unnest('{1.0,0.1,0.01}'::FLOAT4[]) AS lr_scale1) AS h,
+		(SELECT unnest('{1.0,0.1,0.01}'::FLOAT4[]) AS lr_scale2) AS i
+	ORDER BY random
+	LIMIT 100 ) AS a
+)RETURNING layer_id;--6852-6951
+
+
+INSERT INTO stochastic.layer_stochasticsoftmax (layer_class,n_classes,irange,W_lr_scale,b_lr_scale) (
+	SELECT 'stochasticsoftmax',20,0.05,lr_scale, lr_scale
+	FROM (SELECT unnest('{0.01,0.001}'::FLOAT4[]) AS lr_scale) AS a
+) RETURNING layer_id;--6952-6953
+
+
+INSERT INTO hps3.config_mlp_sgd (
+	model_class,train_class,task_id,dataset_id,input_space_id,channel_array,
+	ext_array,term_array,layer_array,cost_array,
+	batch_size,learning_rate,init_momentum,random_seed, description) (
+	SELECT 'mlp','sgd',25,16,3,'{1}'::INT8[],
+		ext_array,'{5,4}'::INT8[],layer_array,'{8}'::INT8[],
+		32,0.1,init_momentum,random_seed, 'stoch2c capacity++'
+	FROM	(
+		SELECT ARRAY[layer1, layer2]::INT8[] AS layer_array, random()*1000000 AS random_seed
+		FROM (SELECT generate_series(6852,6951,1) AS layer1) AS a,
+		     (SELECT generate_series(6952,6953,1) AS layer2) AS b
+		ORDER BY random_seed LIMIT 25 
+		) AS a,
+		(
+			SELECT '{1,6}'::INT8[] AS ext_array, 0.2 AS init_momentum
+			UNION ALL
+			SELECT '{6}'::INT8[] AS ext_array, NULL AS init_momentum
+		) AS b
+) RETURNING config_id;--7758;7709
+
+SELECT MAX(config_id), MIN(config_id) FROM hps3.config_mlp_sgd WHERE task_id = 25

@@ -82,7 +82,7 @@ class StochasticHPS(HPS):
         WHERE layer_id = %s
         """, (layer_id,), self.db.FETCH_ONE)
         if not row or row is None:
-            raise HPSData("No stochastic1 layer for layer_id="\
+            raise HPSData("No conditional1 layer for layer_id="\
                 +str(layer_id))
         (dim,hidden_dim,hidden_activation,
             sparsity_target,sparsity_cost_coeff,irange,istdev,
@@ -96,6 +96,35 @@ class StochasticHPS(HPS):
                 W_lr_scale=W_lr_scale,b_lr_scale=b_lr_scale,
                 max_col_norm=max_col_norm,layer_name=layer_name,
                 weight_decay_coeff=weight_decay_coeff,istdev=istdev)  
+                
+    def get_layer_conditional2(self, layer_id, layer_name):
+        row = self.db.executeSQL("""
+        SELECT   dim,hidden_dim,hidden_activation,
+                 sparsity_target,sparsity_cost_coeff,irange,istdev,
+                 variance_beta, variance_cost_coeff,
+                 sparse_init,sparse_stdev,init_bias,W_lr_scale,
+                 b_lr_scale,max_col_norm, weight_decay_coeff
+        FROM stochastic.layer_conditional1
+        WHERE layer_id = %s
+        """, (layer_id,), self.db.FETCH_ONE)
+        if not row or row is None:
+            raise HPSData("No conditional2 layer for layer_id="\
+                +str(layer_id))
+        (dim,hidden_dim,hidden_activation, 
+            sparsity_target,sparsity_cost_coeff,irange,istdev,
+            variance_beta,variance_cost_coeff,
+            sparse_init,sparse_stdev,init_bias,W_lr_scale,b_lr_scale,
+            max_col_norm,weight_decay_coeff) = row
+        return Conditional2(dim=dim,hidden_dim=hidden_dim,
+                hidden_activation=hidden_activation,irange=irange,
+                sparsity_target=sparsity_target,init_bias=init_bias,
+                sparsity_cost_coeff=sparsity_cost_coeff,
+                sparse_init=sparse_init,sparse_stdev=sparse_stdev,
+                W_lr_scale=W_lr_scale,b_lr_scale=b_lr_scale,
+                max_col_norm=max_col_norm,layer_name=layer_name,
+                weight_decay_coeff=weight_decay_coeff,istdev=istdev,
+                variance_beta=variance_beta,
+                variance_cost_coeff=variance_cost_coeff)  
                  
     def get_cost_conditional1(self, cost_id):
         row = self.db.executeSQL("""
@@ -239,14 +268,15 @@ if __name__=='__main__':
     if len(sys.argv) > 3:
         start_config_id = int(sys.argv[3])
     base_channel_names = ['train_objective', 
-                          'train_stochastic20_max_unit_sparsity_prop',
-                          'train_stochastic20_mean_output_sparsity',
-                          'train_stochastic20_mean_sparsity_prop', 
-                          'train_stochastic20_min_unit_sparsity_prop',
-                          'train_stochastic20_mean_unit_sparsity_meta_prop',
-                          'train_stochastic20_mean_unit_sparsity_meta_prop2']
+                          'train_conditional10_max_unit_sparsity_prop',
+                          'train_conditional10_mean_output_sparsity',
+                          'train_conditional10_mean_sparsity_prop', 
+                          'train_conditional10_min_unit_sparsity_prop',
+                          'train_conditional10_mean_unit_sparsity_meta_prop',
+                          'train_conditional10_mean_unit_sparsity_meta_prop2']
     hps = StochasticHPS(task_id=task_id, worker_name=worker_name,
-                        base_channel_names=base_channel_names)
+                        base_channel_names=base_channel_names,
+                        mbsb_channel_name = None)
     hps.run(start_config_id)
     if len(sys.argv) < 2:
         print """
