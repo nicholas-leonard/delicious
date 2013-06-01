@@ -11,18 +11,18 @@ from stochastic_hps import *
 
 
 def usage():
-    print """usage: python analyse.py model.pkl dataset_id
+    print """usage: python analyse.py model.pkl dataset_id threshold stochastic valid
 Where model.pkl contains a trained pylearn2.models.mlp.MLP object.
 The script will make submission.csv, which you may then upload to the
 kaggle site."""
 
 
-if len(sys.argv) != 3:
+if len(sys.argv) != 6:
     usage()
     print "(You used the wrong # of arguments)"
     quit(-1)
 
-_, model_path, dataset_id = sys.argv
+_, model_path, dataset_id, threshold, stochastic, valid = sys.argv
 
 from pylearn2.utils import serial
 
@@ -51,7 +51,13 @@ hps.train_ddm = hps.get_ddm(train_ddm_id)
 hps.valid_ddm = hps.get_ddm(valid_ddm_id)
 hps.test_ddm = hps.get_ddm(test_ddm_id)
 hps.apply_preprocess()
-dataset = hps.test_ddm
+valid = bool(int(valid))
+if valid:
+    print 'valid'
+    dataset = hps.valid_ddm
+else:
+    print 'test'
+    dataset = hps.test_ddm
 
 # use smallish batches to avoid running out of memory
 batch_size = 10
@@ -63,12 +69,16 @@ model.set_batch_size(batch_size)
 
 l = model.layers[0]
 #import pdb; pdb.set_trace()
-l.beta_mean = l.beta_dist.get_value().mean()
+#l.beta_mean = l.beta_dist.get_value().mean()
 
 X = model.get_input_space().make_batch_theano()
 target = T.matrix('target') 
 # (batch_size, 30, 98)
-H = model.layers[0].test_fprop(X)
+threshold = float(threshold)
+stochastic = bool(int(stochastic))
+if stochastic:
+    threshold = None
+H = model.layers[0].test_fprop(X, threshold=threshold, stochastic=stochastic)
 Y = model.layers[1].fprop(H)
 MCA = T.mean(T.cast(T.neq(T.argmax(Y, axis=1), 
                        T.argmax(target, axis=1)), dtype='int32'),
@@ -101,5 +111,6 @@ for imgIdx in xrange(dataset.X.shape[0] / batch_size):
 mca = np.asarray(y).mean()
 mca2 = np.asarray(y2).mean()
 s = np.asarray(s).mean()
+print "first should be lower"
 print mca, s, mca2
 

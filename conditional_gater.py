@@ -105,11 +105,13 @@ class Conditional1Cost(MLPCost):
         return gradients, updates      
         
     def get_test_cost(self, model, X, Y):
-        if hasattr(model.layers[0], 'test_fprop'):
-            H = model.layers[0].test_fprop(X)
-        else:
-            H = model.layers[0].fprop(X)
-        y = model.layers[1].fprop(H)
+        state_below = X
+        for layer in model.layers:
+            if hasattr(layer, 'test_fprop'):
+                state_below = layer.test_fprop(state_below)
+            else:
+                state_below = layer.fprop(state_below)
+        y = state_below
         MCE = T.mean(T.cast(T.neq(T.argmax(y, axis=1), 
                        T.argmax(Y, axis=1)), dtype='int32'),
                        dtype=config.floatX)
@@ -795,26 +797,26 @@ class Conditional3(Layer):
         self.__dict__.update(locals())
         del self.self
         
-        if noise_scale is None:
-            r = sparsity_target**(1./stochastic_ratio)
-            self.noise_scale = abs(-math.log((1./r)-1.))
-            print 'noise scale', self.noise_scale
-        
-        beta = self.noise_beta
-        s = self.sparsity_target
-        alpha = (s*(beta-2.0)+1.0)/(1.0-s)
-        print 'alpha, beta', alpha, beta
-        self.noise_alpha = alpha
-        
-        self.beta_dist = sharedX((np.random.beta(alpha,beta,size=(3200,dim))-0.5)*self.noise_scale)
-        self.beta_idx = theano.shared(int(0))
-        self.beta_mean = self.beta_dist.get_value().mean(0)
-        
-        self.noise = sharedX((1.-self.noise_normality) * self.beta_mean)
-        print 'noise', self.noise.get_value().mean(), self.noise.get_value().std()
-        
-        #self.consider_constant = []
-
+        if self.noise_beta == 0:
+            self.noise_beta = None
+        print self.noise_beta
+        if self.noise_beta is not None:
+            if noise_scale is None:
+                r = sparsity_target**(1./stochastic_ratio)
+                self.noise_scale = abs(-math.log((1./r)-1.))
+                print 'noise scale', self.noise_scale
+            beta = self.noise_beta
+            s = self.sparsity_target
+            alpha = (s*(beta-2.0)+1.0)/(1.0-s)
+            print 'alpha, beta', alpha, beta
+            self.noise_alpha = alpha
+            
+            self.beta_dist = sharedX((np.random.beta(alpha,beta,size=(3200,dim))-0.5)*self.noise_scale)
+            self.beta_idx = theano.shared(int(0))
+            self.beta_mean = self.beta_dist.get_value().mean()
+            
+        elif self.noise_scale is None:
+            self.noise_scale = 1.0
 
     def get_lr_scalers(self):
         rval = OrderedDict()
@@ -975,7 +977,7 @@ class Conditional3(Layer):
             = T.cast(T.gt(prop_per_unit,0.75),floatX).mean()
         return rval
 
-    def fprop(self, state_below, add_noise=True):
+    def fprop(self, state_below, add_noise=True, threshold=None, stochastic=True):
         self.input_space.validate(state_below)
 
         if self.requires_reformat:
@@ -994,12 +996,14 @@ class Conditional3(Layer):
             self.z = S.dot(self.x,self.W[0]) + self.b[0]
         else:
             self.z = T.dot(self.x,self.W[0]) + self.b[0]
-        
+
+
+        self.stopper = self.x * T.ones_like(self.x)
         # first layer non-linear part
-        if isinstance(self.x, S.SparseVariable):
-            h = S.dot(self.x,self.W[1]) + self.b[1]
+        if isinstance(self.stopper, S.SparseVariable):
+            h = S.dot(self.stopper,self.W[1]) + self.b[1]
         else:
-            h = T.dot(self.x,self.W[1]) + self.b[1]
+            h = T.dot(self.stopper,self.W[1]) + self.b[1]
         
         # activate hidden units of non-linear part
         if self.hidden_activation is None:
@@ -1015,19 +1019,28 @@ class Conditional3(Layer):
         else:
             raise NotImplementedError()
         
-        rng = MRG_RandomStreams(self.mlp.rng.randint(2**15))
         
-        noise = self.noise
+        rng = MRG_RandomStreams(self.mlp.rng.randint(2**15))
+        noise = 0
+        if self.noise_beta is not None:
+            noise = (1.-self.noise_normality) * self.beta_mean
+        print noise
         
         if add_noise:
-            rng = MRG_RandomStreams(self.mlp.rng.randint(2**15))
-            noise = (1.-self.noise_normality) * self.beta_dist[ \
-                    self.beta_idx:self.beta_idx+self.x.shape[0],:] \
-                    + (self.noise_normality * self.noise_scale \
-                            * rng.normal(size = self.z.shape, 
-                                    std=self.noise_stdev ,
-                                    dtype=self.z.type.dtype) \
-                        )
+            if self.noise_beta is not None:
+                noise = (1.-self.noise_normality) * self.beta_dist[ \
+                        self.beta_idx:self.beta_idx+self.x.shape[0],:] \
+                        + (self.noise_normality * self.noise_scale \
+                                * rng.normal(size = self.z.shape, 
+                                        std=self.noise_stdev ,
+                                        dtype=self.z.type.dtype) \
+                            )
+            else:
+                noise = self.noise_scale \
+                    * rng.normal(size = self.z.shape, 
+                                        std=self.noise_stdev ,
+                                        dtype=self.z.type.dtype)
+        
         
         # second layer non-linear part
         self.a = T.dot(self.h,self.W[2]) + self.b[2] + noise
@@ -1039,10 +1052,19 @@ class Conditional3(Layer):
         self.stoch_m_mean = self.m_mean**self.stochastic_ratio
         self.deter_m_mean = self.m_mean**(1.-self.stochastic_ratio)
         
-        self.m = rng.binomial(size = self.stoch_m_mean.shape, n = 1 , \
+        if threshold is None:
+            if stochastic:
+                # sample from bernouili probs to generate a mask
+                self.m = rng.binomial(size = self.stoch_m_mean.shape, n = 1 , \
                     p = self.m_mean, dtype=self.stoch_m_mean.type.dtype)
-                    
-        self.consider_constant = [self.m]
+            else:
+                self.m = self.m_mean
+        else:
+            # deterministic mask:
+            self.m = T.cast(T.gt(self.stoch_m_mean, threshold), \
+                                           theano.config.floatX)
+                                        
+        self.consider_constant = [self.m, self.stopper]
            
         # mix output of linear part with output of non-linear part
         self.p = self.m * self.deter_m_mean * self.z
@@ -1057,9 +1079,9 @@ class Conditional3(Layer):
             self.p.name = self.layer_name + '_p'
         
         return self.p
-    
-    def test_fprop(self, state_below):
-        return self.fprop(state_below, add_noise=False)
+
+    def test_fprop(self, state_below, threshold=None, stochastic=True):
+        return self.fprop(state_below, add_noise=False, threshold=threshold, stochastic=stochastic)
 
     def cost(self, Y, Y_hat):
         return self.cost_from_cost_matrix(self.cost_matrix(Y, Y_hat))
@@ -1102,12 +1124,15 @@ class Conditional3(Layer):
         return rval
         
     def get_updates(self):
-        return {self.beta_idx: (self.beta_idx + 32) % 3200}
+        if self.noise_beta is not None:
+            return {self.beta_idx: (self.beta_idx + 32) % 3200}
+        return {}
         
         
  
 class Conditional4(Layer):
     """
+    Yoshua's Semi-hard Stochastic ReLU 
     A linear layer for the main part, 
     and two layers with sigmoid outputs and non-linear hidden units 
     that generates a sparse continuous mask for the outputs of the 
@@ -1119,7 +1144,10 @@ class Conditional4(Layer):
                  hidden_dim,
                  layer_name,
                  hidden_activation = 'tanh',
+                 noise_stdev = 14.0,
                  sparsity_cost_coeff = 0.001,
+                 sparsity_target = 0.1,
+                 sparsity_decay = 0.95,
                  gater_activation = 'rectifiedlinear',
                  irange = [None,None,None],
                  istdev = [None,None,None],
@@ -1154,6 +1182,9 @@ class Conditional4(Layer):
                      
         self.__dict__.update(locals())
         del self.self
+        
+        self.sparsity_cost_coeff = sharedX(sparsity_cost_coeff)
+        self.max_sparsity_cc = sparsity_cost_coeff
 
     def get_lr_scalers(self):
         rval = OrderedDict()
@@ -1282,13 +1313,14 @@ class Conditional4(Layer):
         
     def get_monitoring_channels_from_state(self, state, target=None):
         rval =  OrderedDict()
+        rval['sparsity_cost_coeff'] = self.sparsity_cost_coeff
         # sparisty of outputs:
         rval['mean_output_sparsity'] = self.m_mean.mean()
         # proportion of sigmoids that have prob > 0.5
         # good when equal to sparsity
         floatX = theano.config.floatX
         rval['mean_sparsity_prop'] \
-            = T.cast(T.gt(self.m_mean, 0),floatX).mean()
+            = self.effective_sparsity
         # same as above but for intermediate thresholds:
         rval['mean_sparsity_prop0.2'] \
             = T.cast(T.gt(self.m_mean, 0.2),floatX).mean()
@@ -1316,7 +1348,7 @@ class Conditional4(Layer):
             = T.cast(T.gt(prop_per_unit,0.75),floatX).mean()
         return rval
 
-    def fprop(self, state_below):
+    def fprop(self, state_below, add_noise=True):
         self.input_space.validate(state_below)
 
         if self.requires_reformat:
@@ -1359,13 +1391,9 @@ class Conditional4(Layer):
         noise = 0.
         if add_noise:
             rng = MRG_RandomStreams(self.mlp.rng.randint(2**15))
-            noise = (1.-self.noise_normality) * self.beta_dist[ \
-                    self.beta_idx:self.beta_idx+self.x.shape[0],:] \
-                    + (self.noise_normality \
-                            * rng.normal(size = self.z.shape, 
+            noise = rng.normal(size = self.z.shape, 
                                     std=self.noise_stdev ,
-                                    dtype=self.z.type.dtype) \
-                        )
+                                    dtype=self.z.type.dtype) 
         
         # second layer non-linear part
         self.a = T.dot(self.h,self.W[2]) + self.b[2] + noise
@@ -1379,6 +1407,10 @@ class Conditional4(Layer):
             self.m_mean = T.maximum(0, self.a)
         else:
             raise NotImplementedError()
+        
+        # how many are over 0:
+        self.effective_sparsity = T.cast(T.gt(self.m_mean, 0), 
+                                         theano.config.floatX).mean()
            
         # mix output of linear part with output of non-linear part
         self.p = self.m_mean * self.z
@@ -1391,6 +1423,9 @@ class Conditional4(Layer):
             self.p.name = self.layer_name + '_p'
         
         return self.p
+        
+    def test_fprop(self, state_below):
+        return self.fprop(state_below, add_noise=False)
 
     def cost(self, Y, Y_hat):
         return self.cost_from_cost_matrix(self.cost_matrix(Y, Y_hat))
@@ -1403,6 +1438,23 @@ class Conditional4(Layer):
         
     def get_cost(self):
         return self.get_l1_norm() + self.get_weight_decay() 
+    
+    def get_updates(self):
+        """ Keeps the effective sparsity around sparsity_target """
+        updates = OrderedDict()
+        updates[self.sparsity_cost_coeff] \
+            = T.clip( \
+                self.sparsity_cost_coeff - \
+                (T.cast(T.gt( \
+                    self.sparsity_target-self.effective_sparsity,0.01),
+                    theano.config.floatX \
+                ) * self.sparsity_decay * self.sparsity_cost_coeff) \
+                + (T.cast(T.lt( \
+                    self.sparsity_target-self.effective_sparsity,-0.01),
+                    theano.config.floatX \
+                ) * self.sparsity_decay * self.sparsity_cost_coeff) \
+            ,0.000000001,self.max_sparsity_cc*10)
+        return updates
         
     def get_l1_norm(self):
         '''
@@ -1477,16 +1529,19 @@ class Conditional5(Layer):
                      
         self.__dict__.update(locals())
         del self.self
-        
-        beta = self.noise_beta
-        s = self.sparsity_target
-        alpha = (s*(beta-2.0)+1.0)/(1.0-s)
-        print 'alpha, beta', alpha, beta
-        self.noise_alpha = alpha
-        
-        self.beta_dist = sharedX((np.random.beta(alpha,beta,size=(3200,dim))-0.5)*self.noise_scale)
-        self.beta_idx = theano.shared(int(0))
-        self.beta_mean = self.beta_dist.get_value().mean()
+        if self.noise_beta == 0:
+            self.noise_beta = None
+        print self.noise_beta
+        if self.noise_beta is not None:
+            beta = self.noise_beta
+            s = self.sparsity_target
+            alpha = (s*(beta-2.0)+1.0)/(1.0-s)
+            print 'alpha, beta', alpha, beta
+            self.noise_alpha = alpha
+            
+            self.beta_dist = sharedX((np.random.beta(alpha,beta,size=(3200,dim))-0.5)*self.noise_scale)
+            self.beta_idx = theano.shared(int(0))
+            self.beta_mean = self.beta_dist.get_value().mean()
 
 
     def get_lr_scalers(self):
@@ -1688,21 +1743,29 @@ class Conditional5(Layer):
         else:
             raise NotImplementedError()
         
-        noise = (1.-self.noise_normality) * self.beta_mean
-        #print self.noise_normality
-        print (1.-self.noise_normality) * self.noise_scale * (self.sparsity_target - 0.5)
+        noise = 0
+        if self.noise_beta is not None:
+            noise = (1.-self.noise_normality) * self.beta_mean
+            #print self.noise_normality
+            print (1.-self.noise_normality) * self.noise_scale * (self.sparsity_target - 0.5)
         print noise
         
         if add_noise:
             rng = MRG_RandomStreams(self.mlp.rng.randint(2**15))
-            noise = (1.-self.noise_normality) * self.beta_dist[ \
-                    self.beta_idx:self.beta_idx+self.x.shape[0],:] \
-                    + (self.noise_normality * self.noise_scale \
-                            * rng.normal(size = self.z.shape, 
-                                    std=self.noise_stdev ,
-                                    dtype=self.z.type.dtype) \
-                        )
-            
+            if self.noise_beta is not None:
+                noise = (1.-self.noise_normality) * self.beta_dist[ \
+                        self.beta_idx:self.beta_idx+self.x.shape[0],:] \
+                        + (self.noise_normality * self.noise_scale \
+                                * rng.normal(size = self.z.shape, 
+                                        std=self.noise_stdev ,
+                                        dtype=self.z.type.dtype) \
+                            )
+            else:
+                noise = self.noise_scale \
+                    * rng.normal(size = self.z.shape, 
+                                        std=self.noise_stdev ,
+                                        dtype=self.z.type.dtype)
+                
         #print self.beta_dist.get_value().shape
             
         # second layer non-linear part
@@ -1760,5 +1823,7 @@ class Conditional5(Layer):
         return rval
         
     def get_updates(self):
-        return {self.beta_idx: (self.beta_idx + 32) % 3200}
+        if self.noise_beta is not None:
+            return {self.beta_idx: (self.beta_idx + 32) % 3200}
+        return {}
 

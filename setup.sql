@@ -39,6 +39,47 @@ CREATE TABLE stochastic.layer_stochastic2 (
 	PRIMARY KEY (layer_id)
 ) INHERITS (hps3.layer);
 
+--DROP TABLE stochastic.layer_stochastic3;
+CREATE TABLE stochastic.layer_stochastic3 (
+	dim			INT4,
+	hidden_dim		INT4,
+	mean_loss_coeff 	FLOAT4 DEFAULT 0.9,
+	hidden_activation 	VARCHAR(255) DEFAULT 'tanh',
+	sparsity_target 	FLOAT4 DEFAULT 0.1,
+	sparsity_cost_coeff 	FLOAT4 DEFAULT 1.0,
+	stoch_grad_coeff	FLOAT4 DEFAULT 1.0,
+	irange 			FLOAT4[2] DEFAULT ARRAY[NULL,NULL]::FLOAT4[],
+	istdev 			FLOAT4[2] DEFAULT ARRAY[NULL,NULL]::FLOAT4[],
+	sparse_init 		INT4[2] DEFAULT ARRAY[NULL,NULL]::INT4[],
+	sparse_stdev 		FLOAT4[2] DEFAULT ARRAY[1.,1.]::FLOAT4[],
+	init_bias 		FLOAT4[2] DEFAULT ARRAY[0.,0.]::FLOAT4[],
+	W_lr_scale 		FLOAT4[2] DEFAULT ARRAY[NULL,NULL]::FLOAT4[],
+	b_lr_scale 		FLOAT4[2] DEFAULT ARRAY[NULL,NULL]::FLOAT4[],
+	max_col_norm		FLOAT4[2] DEFAULT ARRAY[NULL,NULL]::FLOAT4[],
+	weight_decay_coeff	FLOAT4[2] DEFAULT ARRAY[NULL,NULL]::FLOAT4[],
+	PRIMARY KEY (layer_id)
+) INHERITS (hps3.layer);
+
+
+CREATE TABLE stochastic.layer_stochastic4 (
+	dim			INT4,
+	hidden_dim		INT4,
+	hidden_activation 	VARCHAR(255) DEFAULT 'tanh',
+	derive_sigmoid		BOOLEAN DEFAULT TRUE,
+	sparsity_target 	FLOAT4 DEFAULT 0.1,
+	sparsity_cost_coeff 	FLOAT4 DEFAULT 1.0,
+	irange 			FLOAT4[3] DEFAULT ARRAY[NULL,NULL,NULL]::FLOAT4[],
+	istdev 			FLOAT4[3] DEFAULT ARRAY[NULL,NULL,NULL]::FLOAT4[],
+	sparse_init 		INT4[3] DEFAULT ARRAY[NULL,NULL,NULL]::INT4[],
+	sparse_stdev 		FLOAT4[3] DEFAULT ARRAY[1.,1.,1.]::FLOAT4[],
+	init_bias 		FLOAT4[3] DEFAULT ARRAY[0.,0.,0.]::FLOAT4[],
+	W_lr_scale 		FLOAT4[3] DEFAULT ARRAY[NULL,NULL,NULL]::FLOAT4[],
+	b_lr_scale 		FLOAT4[3] DEFAULT ARRAY[NULL,NULL,NULL]::FLOAT4[],
+	max_col_norm		FLOAT4[3] DEFAULT ARRAY[NULL,NULL,NULL]::FLOAT4[],
+	weight_decay_coeff	FLOAT4[3] DEFAULT ARRAY[NULL,NULL,NULL]::FLOAT4[],
+	PRIMARY KEY (layer_id)
+) INHERITS (hps3.layer);
+
 
 CREATE TABLE stochastic.layer_conditional1 (
 	dim			INT4,
@@ -111,6 +152,9 @@ CREATE TABLE stochastic.layer_conditional4 (
 	hidden_activation 	VARCHAR(255) DEFAULT 'tanh',
 	gater_activation	VARCHAR(255) DEFAULT 'rectifiedlinear',
 	sparsity_cost_coeff 	FLOAT4 DEFAULT 1.0,
+	sparsity_target		FLOAT4 DEFAULT 0.1,
+	sparsity_decay		FLOAT4 DEFAULT 1.0,
+	noise_stdev		FLOAT4 DEFAULT 14.0,
 	irange 			FLOAT4[3] DEFAULT ARRAY[NULL,NULL,NULL]::FLOAT4[],
 	istdev 			FLOAT4[3] DEFAULT ARRAY[NULL,NULL,NULL]::FLOAT4[],
 	sparse_init 		INT4[3] DEFAULT ARRAY[NULL,NULL,NULL]::INT4[],

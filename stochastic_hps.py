@@ -44,19 +44,75 @@ class StochasticHPS(HPS):
         SELECT   dim,hidden_dim,mean_loss_coeff,hidden_activation,
                  sparsity_target,sparsity_cost_coeff,irange,istdev,
                  sparse_init,sparse_stdev,init_bias,W_lr_scale,
-                 b_lr_scale,max_col_norm, weight_decay_coeff
+                 b_lr_scale,max_col_norm, weight_decay_coeff,
+                 stoch_grad_coeff
         FROM stochastic.layer_stochastic2
         WHERE layer_id = %s
         """, (layer_id,), self.db.FETCH_ONE)
         if not row or row is None:
-            raise HPSData("No stochastic1 layer for layer_id="\
+            raise HPSData("No stochastic2 layer for layer_id="\
                 +str(layer_id))
         (dim,hidden_dim,mean_loss_coeff,hidden_activation,
             sparsity_target,sparsity_cost_coeff,irange,istdev,
             sparse_init,sparse_stdev,init_bias,W_lr_scale,b_lr_scale,
-            max_col_norm, weight_decay_coeff) = row
+            max_col_norm, weight_decay_coeff, stoch_grad_coeff) = row
         return Stochastic2(dim=dim,hidden_dim=hidden_dim,
                 mean_loss_coeff=mean_loss_coeff,istdev=istdev,
+                hidden_activation=hidden_activation,irange=irange,
+                sparsity_target=sparsity_target,init_bias=init_bias,
+                sparsity_cost_coeff=sparsity_cost_coeff,
+                sparse_init=sparse_init,sparse_stdev=sparse_stdev,
+                W_lr_scale=W_lr_scale,b_lr_scale=b_lr_scale,
+                max_col_norm=max_col_norm,layer_name=layer_name,
+                weight_decay_coeff=weight_decay_coeff,
+                stoch_grad_coeff=stoch_grad_coeff)  
+                
+    def get_layer_stochastic3(self, layer_id, layer_name):
+        row = self.db.executeSQL("""
+        SELECT   dim,hidden_dim,mean_loss_coeff,hidden_activation,
+                 sparsity_target,sparsity_cost_coeff,irange,istdev,
+                 sparse_init,sparse_stdev,init_bias,W_lr_scale,
+                 b_lr_scale,max_col_norm, weight_decay_coeff,
+                 stoch_grad_coeff
+        FROM stochastic.layer_stochastic3
+        WHERE layer_id = %s
+        """, (layer_id,), self.db.FETCH_ONE)
+        if not row or row is None:
+            raise HPSData("No stochastic3 layer for layer_id="\
+                +str(layer_id))
+        (dim,hidden_dim,mean_loss_coeff,hidden_activation,
+            sparsity_target,sparsity_cost_coeff,irange,istdev,
+            sparse_init,sparse_stdev,init_bias,W_lr_scale,b_lr_scale,
+            max_col_norm, weight_decay_coeff, stoch_grad_coeff) = row
+        return Stochastic3(dim=dim,hidden_dim=hidden_dim,
+                mean_loss_coeff=mean_loss_coeff,istdev=istdev,
+                hidden_activation=hidden_activation,irange=irange,
+                sparsity_target=sparsity_target,init_bias=init_bias,
+                sparsity_cost_coeff=sparsity_cost_coeff,
+                sparse_init=sparse_init,sparse_stdev=sparse_stdev,
+                W_lr_scale=W_lr_scale,b_lr_scale=b_lr_scale,
+                max_col_norm=max_col_norm,layer_name=layer_name,
+                weight_decay_coeff=weight_decay_coeff,
+                stoch_grad_coeff=stoch_grad_coeff)  
+                
+    def get_layer_stochastic4(self, layer_id, layer_name):
+        row = self.db.executeSQL("""
+        SELECT   dim,hidden_dim,hidden_activation,derive_sigmoid,
+                 sparsity_target,sparsity_cost_coeff,irange,istdev,
+                 sparse_init,sparse_stdev,init_bias,W_lr_scale,
+                 b_lr_scale,max_col_norm, weight_decay_coeff
+        FROM stochastic.layer_stochastic4
+        WHERE layer_id = %s
+        """, (layer_id,), self.db.FETCH_ONE)
+        if not row or row is None:
+            raise HPSData("No stochastic4 layer for layer_id="\
+                +str(layer_id))
+        (dim,hidden_dim,hidden_activation,derive_sigmoid,
+            sparsity_target,sparsity_cost_coeff,irange,istdev,
+            sparse_init,sparse_stdev,init_bias,W_lr_scale,b_lr_scale,
+            max_col_norm, weight_decay_coeff) = row
+        return Stochastic4(dim=dim,hidden_dim=hidden_dim,
+                derive_sigmoid=derive_sigmoid,istdev=istdev,
                 hidden_activation=hidden_activation,irange=irange,
                 sparsity_target=sparsity_target,init_bias=init_bias,
                 sparsity_cost_coeff=sparsity_cost_coeff,
@@ -152,7 +208,8 @@ class StochasticHPS(HPS):
     def get_layer_conditional4(self, layer_id, layer_name):
         row = self.db.executeSQL("""
         SELECT   dim,hidden_dim,hidden_activation,gater_activation,
-                 sparsity_cost_coeff,irange,istdev,
+                 sparsity_cost_coeff,noise_stdev,irange,istdev,
+                 sparsity_target,sparsity_decay,
                  sparse_init,sparse_stdev,init_bias,W_lr_scale,
                  b_lr_scale,max_col_norm, weight_decay_coeff
         FROM stochastic.layer_conditional4
@@ -162,7 +219,8 @@ class StochasticHPS(HPS):
             raise HPSData("No conditional4 layer for layer_id="\
                 +str(layer_id))
         (dim,hidden_dim,hidden_activation,gater_activation,
-            sparsity_cost_coeff,irange,istdev,
+            sparsity_cost_coeff,noise_stdev,irange,istdev,
+            sparsity_target,sparsity_decay,
             sparse_init,sparse_stdev,init_bias,W_lr_scale,b_lr_scale,
             max_col_norm,weight_decay_coeff) = row
         return Conditional4(dim=dim,hidden_dim=hidden_dim,
@@ -172,7 +230,9 @@ class StochasticHPS(HPS):
                 sparse_init=sparse_init,sparse_stdev=sparse_stdev,
                 W_lr_scale=W_lr_scale,b_lr_scale=b_lr_scale,
                 max_col_norm=max_col_norm,layer_name=layer_name,
-                weight_decay_coeff=weight_decay_coeff,istdev=istdev) 
+                weight_decay_coeff=weight_decay_coeff,istdev=istdev,
+                noise_stdev=noise_stdev,sparsity_target=sparsity_target,
+                sparsity_decay=sparsity_decay) 
                 
     def get_layer_conditional5(self, layer_id, layer_name):
         row = self.db.executeSQL("""
