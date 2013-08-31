@@ -9,6 +9,7 @@ import sys
 from hps3 import HPS, HPSData
 from stochastic_gater import *
 from conditional_gater import *
+from group_gater import *
 from newsgroups20 import Newsgroups20 
 from pylearn2.costs.mlp import WeightDecay, L1WeightDecay
 
@@ -262,6 +263,66 @@ class StochasticHPS(HPS):
                 weight_decay_coeff=weight_decay_coeff,istdev=istdev,
                 noise_beta=noise_beta, noise_scale=noise_scale,
                 noise_stdev=noise_stdev,noise_normality=noise_normality)  
+                
+    def get_layer_group1(self, layer_id, layer_name):
+        row = self.db.executeSQL("""
+        SELECT   gater_dim,hidden_dim,expert_dim,hidden_activation,
+                 sparsity_target,sparsity_cost_coeff,irange,istdev,
+                 sparse_init,sparse_stdev,init_bias,W_lr_scale,
+                 b_lr_scale,max_col_norm,weight_decay_coeff,
+                 derive_sigmoid,expert_activation
+        FROM stochastic.layer_group1
+        WHERE layer_id = %s
+        """, (layer_id,), self.db.FETCH_ONE)
+        if not row or row is None:
+            raise HPSData("No group1 layer for layer_id="\
+                +str(layer_id))
+        (gater_dim,hidden_dim,expert_dim,hidden_activation,
+            sparsity_target,sparsity_cost_coeff,irange,istdev,
+            sparse_init,sparse_stdev,init_bias,W_lr_scale,b_lr_scale,
+            max_col_norm,weight_decay_coeff,derive_sigmoid,
+            expert_activation) = row
+        return Group1(gater_dim=gater_dim,hidden_dim=hidden_dim,
+                expert_dim=expert_dim,istdev=istdev,
+                expert_activation=expert_activation,
+                hidden_activation=hidden_activation,irange=irange,
+                sparsity_target=sparsity_target,init_bias=init_bias,
+                sparsity_cost_coeff=sparsity_cost_coeff,
+                sparse_init=sparse_init,sparse_stdev=sparse_stdev,
+                W_lr_scale=W_lr_scale,b_lr_scale=b_lr_scale,
+                max_col_norm=max_col_norm,layer_name=layer_name,
+                weight_decay_coeff=weight_decay_coeff,
+                derive_sigmoid=derive_sigmoid)
+                
+    def get_layer_group2(self, layer_id, layer_name):
+        row = self.db.executeSQL("""
+        SELECT   dim,gater_dim,hidden_dim,group_prob,hidden_activation,
+                 sparsity_target,sparsity_cost_coeff,irange,istdev,
+                 sparse_init,sparse_stdev,init_bias,W_lr_scale,
+                 b_lr_scale,max_col_norm,weight_decay_coeff,
+                 derive_sigmoid,expert_activation
+        FROM stochastic.layer_group2
+        WHERE layer_id = %s
+        """, (layer_id,), self.db.FETCH_ONE)
+        if not row or row is None:
+            raise HPSData("No group1 layer for layer_id="\
+                +str(layer_id))
+        (dim,gater_dim,hidden_dim,group_prob,hidden_activation,
+            sparsity_target,sparsity_cost_coeff,irange,istdev,
+            sparse_init,sparse_stdev,init_bias,W_lr_scale,b_lr_scale,
+            max_col_norm,weight_decay_coeff,derive_sigmoid,
+            expert_activation) = row
+        return Group2(dim=dim,gater_dim=gater_dim,hidden_dim=hidden_dim,
+                group_prob=group_prob,istdev=istdev,
+                expert_activation=expert_activation,
+                hidden_activation=hidden_activation,irange=irange,
+                sparsity_target=sparsity_target,init_bias=init_bias,
+                sparsity_cost_coeff=sparsity_cost_coeff,
+                sparse_init=sparse_init,sparse_stdev=sparse_stdev,
+                W_lr_scale=W_lr_scale,b_lr_scale=b_lr_scale,
+                max_col_norm=max_col_norm,layer_name=layer_name,
+                weight_decay_coeff=weight_decay_coeff,
+                derive_sigmoid=derive_sigmoid)
                  
     def get_cost_conditional1(self, cost_id):
         row = self.db.executeSQL("""

@@ -738,6 +738,8 @@ class Conditional3(Layer):
     """
     Aaron's gater. Semi-stochastic. Learns through gradient descent.
     
+    STS
+    
     A linear layer for the main part, 
     and two layers with sigmoid outputs and non-linear hidden units 
     that generates a sparse continuous mask for the outputs of the 

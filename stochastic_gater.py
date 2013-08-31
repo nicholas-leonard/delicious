@@ -560,6 +560,8 @@ class Stochastic1(Layer):
 
 class Stochastic2(Layer):
     """
+    Stochastic Binary Neuron
+    
     A linear layer for the continus part, 
     and two layers with stochastic outputs and non-linear hidden units 
     that generates  a binary mask for the outputs of the continus parts.
@@ -1427,7 +1429,7 @@ class StochasticSoftmax(Softmax):
                             disconnected_inputs='raise')
                            
             for i in range(len(grads)):
-                grads[i] += cost_grads[i]
+                grads[i] += cost_grads[i]kmm
                         
         gradients = OrderedDict(izip(params, grads))
         
@@ -1479,6 +1481,8 @@ class SparseTanh(Linear):
 class Stochastic4(Layer):
     """
     Biased low-variance estimator
+    
+    Straight-Through
     """
 
     def __init__(self,
